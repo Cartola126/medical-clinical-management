@@ -1,6 +1,7 @@
 package org.example;
 
 import net.datafaker.Faker;
+import org.example.model.AppointmentStatus;
 
 import javax.sql.DataSource;
 import java.sql.*;
@@ -123,10 +124,15 @@ public class BulkDataInserter {
         DataSource dataSource = DataSourceFactory.getDataSource();
         ExecutorService executor = Executors.newFixedThreadPool(NUM_THREADS);
         int recordsPerThread = totalRecords / NUM_THREADS;
+        AppointmentStatus[] finalStatuses = {
+                AppointmentStatus.Completed,
+                AppointmentStatus.Cancelled,
+                AppointmentStatus.NoShow
+        };
 
         for (int i = 0; i < NUM_THREADS; i++) {
             executor.submit(() -> {
-                String sql = "INSERT INTO Appointments (appointment_datetime, patient_id, doctor_id) VALUES (?, ?, ?)";
+                String sql = "INSERT INTO Appointments (appointment_datetime, patient_id, doctor_id, status) VALUES (?, ?, ?, ?::appointment_status)";
                 try (Connection conn = dataSource.getConnection()) {
                     conn.setAutoCommit(false);
                     try (PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -134,6 +140,8 @@ public class BulkDataInserter {
                             ps.setTimestamp(1, Timestamp.valueOf(FAKER.timeAndDate().future(365, TimeUnit.DAYS, "yyyy-MM-dd hh:mm:ss")));
                             ps.setInt(2, patientIds.get(RANDOM.nextInt(patientIds.size())));
                             ps.setInt(3, doctorIds.get(RANDOM.nextInt(doctorIds.size())));
+                            AppointmentStatus status = finalStatuses[RANDOM.nextInt(finalStatuses.length)];
+                            ps.setString(4, status.name());
                             ps.addBatch();
                             if ((j + 1) % BATCH_SIZE == 0) {
                                 ps.executeBatch();
