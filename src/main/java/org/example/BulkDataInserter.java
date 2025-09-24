@@ -27,10 +27,67 @@ public class BulkDataInserter {
         System.out.println("Iniciando inserção de dados em massa...");
         long totalStartTime = System.nanoTime();
 
-        // TODO: Lógica de inserção de dados
+        System.out.println("1. Inserindo Pacientes e Doutores...");
+        ExecutorService initialExecutor = Executors.newFixedThreadPool(2);
+        Future<?> patientsFuture = initialExecutor.submit(() -> insertData("Patients", NUM_PATIENTS));
+        Future<?> doctorsFuture = initialExecutor.submit(() -> insertData("Doctors", NUM_DOCTORS));
+
+        patientsFuture.get();
+        doctorsFuture.get();
+        initialExecutor.shutdown();
 
         long totalEndTime = System.nanoTime();
         long duration = TimeUnit.NANOSECONDS.toSeconds(totalEndTime - totalStartTime);
         System.out.printf("\nProcesso concluído com sucesso em %d segundos.\n", duration);
+    }
+
+    private static void insertData(String tableName, int totalRecords) {
+        DataSource dataSource = DataSourceFactory.getDataSource();
+        ExecutorService executor = Executors.newFixedThreadPool(NUM_THREADS);
+        int recordsPerThread = totalRecords / NUM_THREADS;
+
+        for (int i = 0; i < NUM_THREADS; i++) {
+            executor.submit(() -> {
+                String sql;
+                if ("Patients".equals(tableName)) {
+                    sql = "INSERT INTO Patients (name, birthday, contact) VALUES (?, ?, ?)";
+                } else {
+                    sql = "INSERT INTO Doctors (name, specialty, office_hours) VALUES (?, ?, ?)";
+                }
+
+                try (Connection conn = dataSource.getConnection()) {
+                    conn.setAutoCommit(false);
+                    try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                        for (int j = 0; j < recordsPerThread; j++) {
+                            if ("Patients".equals(tableName)) {
+                                ps.setString(1, FAKER.name().fullName());
+                                ps.setDate(2, Date.valueOf(FAKER.timeAndDate().birthday(18, 90)));
+                                ps.setString(3, FAKER.phoneNumber().cellPhone());
+                            } else {
+                                ps.setString(1, "Dr. " + FAKER.name().fullName());
+                                ps.setString(2, FAKER.careProvider().medicalProfession());
+                                ps.setString(3, "09:00-17:00");
+                            }
+                            ps.addBatch();
+                            if ((j + 1) % BATCH_SIZE == 0) {
+                                ps.executeBatch();
+                                conn.commit();
+                            }
+                        }
+                        ps.executeBatch();
+                        conn.commit();
+                    }
+                } catch (SQLException e) {
+                    e.printStackTrace();
+                }
+            });
+        }
+        executor.shutdown();
+        try {
+            executor.awaitTermination(1, TimeUnit.HOURS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        System.out.printf("Inserção na tabela %s concluída.\n", tableName);
     }
 }
