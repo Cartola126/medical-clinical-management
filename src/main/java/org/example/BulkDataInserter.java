@@ -90,7 +90,7 @@ public class BulkDataInserter {
                                 conn.commit();
                             }
                         }
-                        ps.executeBatch();
+                        ps.executeBatch(); // Lote final
                         conn.commit();
                     }
                 } catch (SQLException e) {
