@@ -36,6 +36,21 @@ public class BulkDataInserter {
         doctorsFuture.get();
         initialExecutor.shutdown();
 
+        List<Integer> patientIds = fetchIds(dataSource, "Patients");
+        List<Integer> doctorIds = fetchIds(dataSource, "Doctors");
+        System.out.printf("   - Encontrados %d IDs de pacientes.\n", patientIds.size());
+        System.out.printf("   - Encontrados %d IDs de doutores.\n", doctorIds.size());
+
+        System.out.println("\n3. Inserindo Agendamentos e Históricos Médicos...");
+        ExecutorService dependentExecutor = Executors.newFixedThreadPool(2);
+        Future<?> appointmentsFuture = dependentExecutor.submit(() -> insertAppointments(NUM_APPOINTMENTS, patientIds, doctorIds));
+        Future<?> historiesFuture = dependentExecutor.submit(() -> insertMedicalHistories(NUM_MEDICAL_HISTORIES, patientIds));
+
+        appointmentsFuture.get();
+        historiesFuture.get();
+        dependentExecutor.shutdown();
+
+        DataSourceFactory.close();
         long totalEndTime = System.nanoTime();
         long duration = TimeUnit.NANOSECONDS.toSeconds(totalEndTime - totalStartTime);
         System.out.printf("\nProcesso concluído com sucesso em %d segundos.\n", duration);
@@ -65,7 +80,7 @@ public class BulkDataInserter {
                                 ps.setString(3, FAKER.phoneNumber().cellPhone());
                             } else {
                                 ps.setString(1, "Dr. " + FAKER.name().fullName());
-                                ps.setString(2, FAKER.careProvider().medicalProfession());
+                                ps.setString(2, FAKER.job().field());
                                 ps.setString(3, "09:00-17:00");
                             }
                             ps.addBatch();
@@ -88,7 +103,7 @@ public class BulkDataInserter {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
-        System.out.printf("Inserção na tabela %s concluída.\n", tableName);
+        System.out.printf("   - Inserção na tabela %s concluída.\n", tableName);
     }
 
     private static List<Integer> fetchIds(DataSource dataSource, String tableName) throws SQLException {
@@ -101,8 +116,8 @@ public class BulkDataInserter {
                 ids.add(rs.getInt("id"));
             }
         }
-        return ids;
-    }
+        return ids;
+    }
 
     private static void insertAppointments(int totalRecords, List<Integer> patientIds, List<Integer> doctorIds) {
         DataSource dataSource = DataSourceFactory.getDataSource();
@@ -140,5 +155,44 @@ public class BulkDataInserter {
             Thread.currentThread().interrupt();
         }
         System.out.println("   - Inserção na tabela Appointments concluída.");
-    }
+    }
+
+    private static void insertMedicalHistories(int totalRecords, List<Integer> patientIds) {
+        DataSource dataSource = DataSourceFactory.getDataSource();
+        ExecutorService executor = Executors.newFixedThreadPool(NUM_THREADS);
+        int recordsPerThread = totalRecords / NUM_THREADS;
+
+        for (int i = 0; i < NUM_THREADS; i++) {
+            executor.submit(() -> {
+                String sql = "INSERT INTO MedicalHistory (patient_id, diagnosis, treatment, prescriptions) VALUES (?, ?, ?, ?)";
+                try (Connection conn = dataSource.getConnection()) {
+                    conn.setAutoCommit(false);
+                    try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                        for (int j = 0; j < recordsPerThread; j++) {
+                            ps.setInt(1, patientIds.get(RANDOM.nextInt(patientIds.size())));
+                            ps.setString(2, FAKER.disease().anyDisease());
+                            ps.setString(3, FAKER.medicalProcedure().icd10());
+                            ps.setString(4, FAKER.medication().drugName());
+                            ps.addBatch();
+                            if ((j + 1) % BATCH_SIZE == 0) {
+                                ps.executeBatch();
+                                conn.commit();
+                            }
+                        }
+                        ps.executeBatch();
+                        conn.commit();
+                    }
+                } catch (SQLException e) {
+                    e.printStackTrace();
+                }
+            });
+        }
+        executor.shutdown();
+        try {
+            executor.awaitTermination(1, TimeUnit.HOURS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        System.out.println("   - Inserção na tabela MedicalHistory concluída.");
+    }
 }
