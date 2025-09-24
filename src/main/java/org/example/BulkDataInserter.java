@@ -90,7 +90,7 @@ public class BulkDataInserter {
                                 conn.commit();
                             }
                         }
-                        ps.executeBatch(); // Lote final
+                        ps.executeBatch();
                         conn.commit();
                     }
                 } catch (SQLException e) {
@@ -172,15 +172,14 @@ public class BulkDataInserter {
 
         for (int i = 0; i < NUM_THREADS; i++) {
             executor.submit(() -> {
-                String sql = "INSERT INTO MedicalHistory (patient_id, diagnosis, treatment, prescriptions) VALUES (?, ?, ?, ?)";
+                String sql = "INSERT INTO MedicalHistory (patient_id, diagnosis, prescriptions) VALUES (?, ?, ?)";
                 try (Connection conn = dataSource.getConnection()) {
                     conn.setAutoCommit(false);
                     try (PreparedStatement ps = conn.prepareStatement(sql)) {
                         for (int j = 0; j < recordsPerThread; j++) {
                             ps.setInt(1, patientIds.get(RANDOM.nextInt(patientIds.size())));
                             ps.setString(2, FAKER.disease().anyDisease());
-                            ps.setString(3, FAKER.medicalProcedure().icd10());
-                            ps.setString(4, FAKER.medication().drugName());
+                            ps.setString(3, FAKER.medication().drugName());
                             ps.addBatch();
                             if ((j + 1) % BATCH_SIZE == 0) {
                                 ps.executeBatch();
