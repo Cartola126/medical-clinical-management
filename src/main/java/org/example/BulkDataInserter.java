@@ -90,4 +90,55 @@ public class BulkDataInserter {
         }
         System.out.printf("Inserção na tabela %s concluída.\n", tableName);
     }
+
+    private static List<Integer> fetchIds(DataSource dataSource, String tableName) throws SQLException {
+        List<Integer> ids = new ArrayList<>();
+        String sql = "SELECT id FROM " + tableName;
+        try (Connection conn = dataSource.getConnection();
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            while (rs.next()) {
+                ids.add(rs.getInt("id"));
+            }
+        }
+        return ids;
+    }
+
+    private static void insertAppointments(int totalRecords, List<Integer> patientIds, List<Integer> doctorIds) {
+        DataSource dataSource = DataSourceFactory.getDataSource();
+        ExecutorService executor = Executors.newFixedThreadPool(NUM_THREADS);
+        int recordsPerThread = totalRecords / NUM_THREADS;
+
+        for (int i = 0; i < NUM_THREADS; i++) {
+            executor.submit(() -> {
+                String sql = "INSERT INTO Appointments (appointment_datetime, patient_id, doctor_id) VALUES (?, ?, ?)";
+                try (Connection conn = dataSource.getConnection()) {
+                    conn.setAutoCommit(false);
+                    try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                        for (int j = 0; j < recordsPerThread; j++) {
+                            ps.setTimestamp(1, Timestamp.valueOf(FAKER.timeAndDate().future(365, TimeUnit.DAYS, "yyyy-MM-dd hh:mm:ss")));
+                            ps.setInt(2, patientIds.get(RANDOM.nextInt(patientIds.size())));
+                            ps.setInt(3, doctorIds.get(RANDOM.nextInt(doctorIds.size())));
+                            ps.addBatch();
+                            if ((j + 1) % BATCH_SIZE == 0) {
+                                ps.executeBatch();
+                                conn.commit();
+                            }
+                        }
+                        ps.executeBatch();
+                        conn.commit();
+                    }
+                } catch (SQLException e) {
+                    e.printStackTrace();
+                }
+            });
+        }
+        executor.shutdown();
+        try {
+            executor.awaitTermination(1, TimeUnit.HOURS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        System.out.println("   - Inserção na tabela Appointments concluída.");
+    }
 }
